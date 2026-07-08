@@ -55,42 +55,66 @@ app = FastAPI()
 API_URL = "https://v3.football.api-sports.io/fixtures"
 API_HEADERS = {
     "x-rapidapi-host": "v3.football.api-sports.io",
-    "x-rapidapi-key": "INSIRA_SUA_CHAVE_AQUI" # Se tiver chave da api-football, coloque aqui
+    "x-rapidapi-key": "INSIRA_SUA_CHAVE_AQUI" # A chave da api-football é colocada aqui
 }
 
 def popular_banco_fallback(db: Session):
-    """Injeta os confrontos reais e válidos do mata-mata atualizado caso a API falhe ou falte chave"""
-    print("⚠️ Usando dados de contingência atualizados do mata-mata...")
+    """Injeta os confrontos REAIS e oficiais das QUARTAS DE FINAL da Copa 2026"""
+    print("⚠️ Usando os dados REAIS das Quartas de Final da Copa do Mundo 2026...")
     jogos = [
-        PartidaModel(id=101, time_a="Brasil", time_b="Noruega", bandeira_a="https://flagcdn.com/w320/br.png", bandeira_b="https://flagcdn.com/w320/no.png", data_jogo="Oitavas de Final"),
-        PartidaModel(id=102, time_a="México", time_b="Inglaterra", bandeira_a="https://flagcdn.com/w320/mx.png", bandeira_b="https://flagcdn.com/w320/gb-eng.png", data_jogo="Oitavas de Final"),
-        PartidaModel(id=103, time_a="Portugal", time_b="Espanha", bandeira_a="https://flagcdn.com/w320/pt.png", bandeira_b="https://flagcdn.com/w320/es.png", data_jogo="Oitavas de Final"),
-        PartidaModel(id=104, time_a="Estados Unidos", time_b="Bélgica", bandeira_a="https://flagcdn.com/w320/us.png", bandeira_b="https://flagcdn.com/w320/be.png", data_jogo="Oitavas de Final"),
-        PartidaModel(id=105, time_a="Argentina", time_b="Egito", bandeira_a="https://flagcdn.com/w320/ar.png", bandeira_b="https://flagcdn.com/w320/eg.png", data_jogo="Oitavas de Final")
+        PartidaModel(
+            id=201, 
+            time_a="França", 
+            time_b="Marrocos", 
+            bandeira_a="https://flagcdn.com/w320/fr.png", 
+            bandeira_b="https://flagcdn.com/w320/ma.png", 
+            data_jogo="Quartas de Final"
+        ),
+        PartidaModel(
+            id=202, 
+            time_a="Espanha", 
+            time_b="Bélgica", 
+            bandeira_a="https://flagcdn.com/w320/es.png", 
+            bandeira_b="https://flagcdn.com/w320/be.png", 
+            data_jogo="Quartas de Final"
+        ),
+        PartidaModel(
+            id=203, 
+            time_a="Noruega", 
+            time_b="Inglaterra", 
+            bandeira_a="https://flagcdn.com/w320/no.png", 
+            bandeira_b="https://flagcdn.com/w320/gb-eng.png", 
+            data_jogo="Quartas de Final"
+        ),
+        PartidaModel(
+            id=204, 
+            time_a="Argentina", 
+            time_b="Suíça", 
+            bandeira_a="https://flagcdn.com/w320/ar.png", 
+            bandeira_b="https://flagcdn.com/w320/ch.png", 
+            data_jogo="Quartas de Final"
+        )
     ]
     db.add_all(jogos)
     db.commit()
-    print("✅ Jogos de contingência inseridos com sucesso!")
+    print("✅ Confrontos reais inseridos com sucesso!")
 
-# ==================== SINCRONIZAÇÃO DINÂMICA NO STARTUP ====================
+# ==================== SINCRONIZAÇÃO 100% AUTOMÁTICA NO STARTUP ====================
 @app.on_event("startup")
 def sincronizar_jogos_reais_copa():
     db = SessionLocal()
     
-    # Se o banco já possuir partidas cadastradas, pula para evitar duplicados
-    if db.query(PartidaModel).count() > 0:
+    chave_api = API_HEADERS["x-rapidapi-key"]
+    if chave_api == "INSIRA_SUA_CHAVE_AQUI":
+        # Se não houver chave real, força o uso do fallback atualizado com as Quartas de Final
+        if db.query(PartidaModel).count() == 0:
+            popular_banco_fallback(db)
         db.close()
         return
 
-    # Se você não alterou a chave da API, vai direto para o plano B (Fallback Realista)
-    if API_HEADERS["x-rapidapi-key"] == "INSIRA_SUA_CHAVE_AQUI":
-        popular_banco_fallback(db)
-        db.close()
-        return
-
-    print("🔄 Conectando à API externa para capturar os confrontos em tempo real da Copa 2026...")
+    print("🔄 Conectando à API externa para checar atualizações da Copa 2026...")
     params = {
-        "league": "1",    # ID padrão da Copa do Mundo na API-Football
+        "league": "1",    
         "season": "2026"
     }
 
@@ -98,38 +122,54 @@ def sincronizar_jogos_reais_copa():
         response = requests.get(API_URL, headers=API_HEADERS, params=params, timeout=10)
         if response.status_code == 200:
             dados = response.json().get("response", [])
-            jogos_para_salvar = []
             
-            for item in dados:
-                fixture = item.get("fixture", {})
-                teams = item.get("teams", {})
-                status = fixture.get("status", {}).get("short")
-                
-                # Sincroniza apenas partidas futuras ("Not Started") onde o palpite é permitido
-                if status == "NS":
-                    novo_jogo = PartidaModel(
-                        id=fixture.get("id"),
-                        time_a=teams.get("home", {}).get("name"),
-                        time_b=teams.get("away", {}).get("name"),
-                        bandeira_a=teams.get("home", {}).get("logo"),
-                        bandeira_b=teams.get("away", {}).get("logo"),
-                        data_jogo=fixture.get("date")[:10]  # Formato YYYY-MM-DD
-                    )
-                    jogos_para_salvar.append(novo_jogo)
-            
-            if jogos_para_salvar:
-                db.add_all(jogos_para_salvar)
+            if dados:
+                # Estratégia de atualização automática: Limpa as partidas antigas para refletir a nova fase
+                db.query(PartidaModel).delete()
                 db.commit()
-                print(f"✅ {len(jogos_para_salvar)} jogos oficiais da Copa sincronizados dinamicamente!")
-            else:
-                print("⚠️ Nenhum jogo futuro pendente na API. Ativando contingência...")
-                popular_banco_fallback(db)
+                
+                jogos_para_salvar = []
+                for item in dados:
+                    fixture = item.get("fixture", {})
+                    teams = item.get("teams", {})
+                    status = fixture.get("status", {}).get("short")
+                    league_data = item.get("league", {})
+                    
+                    # Filtra partidas pendentes (NS)
+                    if status == "NS":
+                        # Captura e traduz o nome da rodada fornecido dinamicamente pela API
+                        rodada = league_data.get("round", "Copa do Mundo")
+                        rodada = rodada.replace("Quarter-finals", "Quartas de Final")
+                        rodada = rodada.replace("Semi-finals", "Semifinal")
+                        rodada = rodada.replace("Final", "Grande Final")
+                        rodada = rodada.replace("Round of 16", "Oitavas de Final")
+
+                        novo_jogo = PartidaModel(
+                            id=fixture.get("id"),
+                            time_a=teams.get("home", {}).get("name"),
+                            time_b=teams.get("away", {}).get("name"),
+                            bandeira_a=teams.get("home", {}).get("logo"),
+                            bandeira_b=teams.get("away", {}).get("logo"),
+                            data_jogo=rodada
+                        )
+                        jogos_para_salvar.append(novo_jogo)
+                
+                if jogos_para_salvar:
+                    db.add_all(jogos_para_salvar)
+                    db.commit()
+                    print(f"✅ Sucesso! {len(jogos_para_salvar)} jogos da fase atual da Copa sincronizados!")
+                    db.close()
+                    return
+            
+            print("⚠️ API externa não retornou novos jogos pendentes. Mantendo dados locais.")
         else:
-            print(f"❌ Falha na API Externa (Status {response.status_code}). Ativando fallback...")
-            popular_banco_fallback(db)
+            print(f"❌ Falha na API Externa (Status {response.status_code}).")
             
     except Exception as e:
         print(f"❌ Erro de conexão de rede: {str(e)}")
+        
+    # Fallback de segurança caso a tabela esteja limpa e ocorra falhas na requisição
+    if db.query(PartidaModel).count() == 0:
         popular_banco_fallback(db)
         
     db.close()
@@ -168,7 +208,7 @@ def atualizar_palpite(partida_id: int, palpite_atualizado: PalpiteSchema, db: Se
     db_palpite.gols_a = palpite_atualizado.gols_a
     db_palpite.gols_b = palpite_atualizado.gols_b
     db.commit()
-    return {"status": "Palpite updated no banco!"}
+    return {"status": "Palpite atualizado no banco!"}
 
 # DELETE: Deletar palpite
 @app.delete("/palpites/{partida_id}")
